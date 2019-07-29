@@ -25,3 +25,13 @@ myUke.add_string(freqOpen_Hz=440.0, massPerLength_kgm=1e-4, stringDiameter_m=0.0
 
 # Fit the fretboard
 myUke.fit_fretboard()
+
+# Get the model function
+calc_delta = myUke._get_model_func(myUke.stringLst[0])
+
+#
+a  = calc_delta()
+b  = calc_delta([-2.5/1000, 2.5/1000])
+plt.plot(a[1:])
+plt.plot(b[1:])
+plt.show()

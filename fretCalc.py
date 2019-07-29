@@ -27,7 +27,7 @@ class instrument:
         Constructor for the instrument class.
         """
 
-        # Geometric parameters the instrument
+        # Fixed geometric parameters of the instrument
         self.nFrets = nFrets
         self.scaleLength_m = scaleLength_m
         self.actionNut_m  = actionNut_m
@@ -36,31 +36,15 @@ class instrument:
         self.stringSep_m = stringSep_m
 
         # Calculate the fret positions for an ideal instrument (no offsets)
-        self.vibeLenIdealArr_m = self._calc_vibelen(verbose=True)
+        self.vibeLenIdealArr_m = self._calc_vibelen()
 
         # List to store the string objects added via the add_string method
         self.stringLst = []
 
-    def fit_fretboard(self):
-        """
-        Fit for nut and saddle offset for each string to minimise the
-        intonation errror.
-        """
-
-        for strObj in self.stringLst:
-            self._calc_fretted_length(strObj)
-
-    def print_fretboard():
-        """
-        Print a scale diagram of the fretboard.
-        """
-
-        pass
-
     def add_string(self, freqOpen_Hz=440.0, massPerLength_kgm=1e-4,
                    stringDiameter_m=0.0005, elasticity_Pa=4e9):
         """
-        Add a string to the instrument.
+        Add a string to the instrument and calculate basic parameters.
         """
 
         # Create a new string object
@@ -75,6 +59,33 @@ class instrument:
 
         # Append to the list of string objects
         self.stringLst.append(strObj)
+
+    def fit_fretboard(self):
+        """
+        Fit for nut and saddle offset for each string to minimise the
+        intonation errror.
+        """
+
+        # Loop through each of the strings in turn and fit
+        for strObj in self.stringLst:
+
+            ### BELOW JUST FOR TESTING - SHOULD BE IN MODEL FUNCTION
+            
+            # Calculate the fretted length
+            strObj.frettedLenArr_m = self._calc_fretted_length(strObj)
+
+            # Calculate the tension multiplier
+            strObj.tauFreqMultArr = self._calc_tension_mult(strObj)
+            
+            # Calculate the stiffness multiplier
+            strObj.stiffFreqMultArr = self._calc_stiff_mult(strObj)
+
+    def print_fretboard():
+        """
+        Print a scale diagram of the fretboard.
+        """
+
+        pass
 
     def _calc_vibelen(self, strObj=None, verbose=False):
         """
@@ -166,12 +177,108 @@ class instrument:
         newLArr[-1] = np.nan
 
         return newLArr
+    
+    def _calc_tension_mult(self, strObj):
+        """
+        Return an array of (tau + delta_tau) / given the open string
+        frequency, scale-length, string properties and the increase in
+        string length due to bending.
+        """
+    
+        # Calculate the tension in the open string
+        lenOpen_m = strObj.frettedLenArr_m[0]
+        tauOpen_N = (strObj.massPerLength_kgm
+                     * np.power(2 * lenOpen_m * strObj.freqOpen_Hz, 2))
 
+        # Calculate the slack length
+        slackL_m = lenOpen_m / (tauOpen_N
+                                / (strObj.elasticity_Pa * strObj.area_m2) + 1)
+    
+        # Calculate the tension in the deflected string
+        strObj.frettedTauArr_N = (strObj.elasticity_Pa * strObj.area_m2
+                                  * (strObj.frettedLenArr_m - slackL_m)
+                                  / slackL_m)
+    
+        # Frequency multiplier proportional to sqrt(tension)
+        return np.sqrt(strObj.frettedTauArr_N / tauOpen_N)
 
+    def _calc_stiff_mult(self, strObj, n=1):
+        """
+        Calculate the stiffness multiplier: the increase (f + delta_f) / f
+        of the frequency of the nth harmonic due to the resistance of the
+        string to bending motions. Assume n=1 dominates perception of tuning.
+        """
+    
+        # Calculate the tension in the open string
+        lenOpen_m = strObj.vibeLenArr_m[0]
+        tau_N = (strObj.massPerLength_kgm
+                     * np.power(2 * lenOpen_m * strObj.freqOpen_Hz, 2))
+
+        # ALT: More correct to use the deflected tension, but small effect
+        #tau_N =  strObj.frettedTauArr_N
+
+        # Calculate the alpha and beta stretch terms
+        alpha = 4 + (n**2 * np.pi**2) / 2
+        kappa = strObj.stringRadius_m / 2
+        beta = np.sqrt(strObj.elasticity_Pa * strObj.area_m2
+                       * kappa**2 / tau_N)
+
+        # Calculate stiffness multiplier
+        with np.errstate(divide='ignore', invalid='ignore'):
+            stiffFreqMultArr = (1 + 2 * beta / strObj.vibeLenArr_m
+                                + alpha * beta**2 / strObj.vibeLenArr_m**2)
+        
+        # Assuming tuned to open string, so normalise to 1 at nut
+        stiffFreqMultArr /= stiffFreqMultArr[0]
+        stiffFreqMultArr[stiffFreqMultArr == np.inf] = np.nan
+    
+        return stiffFreqMultArr
+
+    def _get_model_func(self, strObj):
+        """
+        Get a model function with fixed instrument & string parameters
+        """
+    
+        # Return function takes only a vector of free parameters
+        def calc_deltafreq_cent(p=[0, 0]):
+            """
+            Model function to calculate intonation given nut & bridge offset.
+        
+            p = [nutOffset_m, saddleOffset_m]
+            """
+    
+            # Update the offsets in the string object
+            strObj.nutOffset_m, strObj.saddleOffset_m = p
+
+            # Calculate the fret positions including offsets
+            strObj.vibeLenArr_m = self._calc_vibelen(strObj)
+    
+            # Calculate the ideal frequencies including offsets
+            strObj.freqArr_Hz = self._calc_freqs(strObj)
+            
+            # Calculate the deflected length
+            strObj.frettedLenArr_m = self._calc_fretted_length(strObj)
+    
+            # Calculate the tension multiplier
+            strObj.tauFreqMultArr = self._calc_tension_mult(strObj)
+            
+            # Calculate the stiffness multiplier
+            strObj.stiffFreqMultArr = self._calc_stiff_mult(strObj)
+
+            # Calculate the deviation from the ideal frequencies in cents
+            freqNewArr_Hz = (strObj.freqArr_Hz * strObj.stiffFreqMultArr
+                             * strObj.tauFreqMultArr)
+            deltaFreq_cent = 1200 * np.log2(freqNewArr_Hz
+                                            / strObj.freqIdealArr_Hz)
+    
+            return deltaFreq_cent
+    
+        return calc_deltafreq_cent
+    
 #-----------------------------------------------------------------------------#
 class string:
     """
-    Class to store the properties of a string.
+    Class to store the fixed and dynamic properties of a string.
     """
 
     def __init__(self, freqOpen_Hz, massPerLength_kgm, stringDiameter_m,
@@ -185,14 +292,33 @@ class string:
         self.massPerLength_kgm = massPerLength_kgm
         self.stringDiameter_m = stringDiameter_m
         self.elasticity_Pa = elasticity_Pa
-
-        # Initialise nut and saddle offsets
-        self.nutOffset_m = 0.0
-        self.saddleOffset_m = 0.0
+        self.stringRadius_m = stringDiameter_m / 2
+        self.area_m2 = np.pi * self.stringRadius_m**2.0
 
         # Array of ideal frequencies (no offsets)
         self.freqIdealArr_Hz = None
 
-        # Array of vibrating lengths (including offsets)
-        self.vibeLenArr_m = None
+        #------- Variables below here are dynamic; depend on offsets ---------#
+        
+        # Initialise nut and saddle offsets
+        self.nutOffset_m = 0.0
+        self.saddleOffset_m = 0.0
 
+        # Array of vibrating lengths that define fretboard
+        self.vibeLenArr_m = None
+        
+        # Array of ideal frequencies (including offsets)
+        self.freqArr_Hz = None
+
+        # Array of open fretted lengths from the clothesline effect
+        self.frettedLenArr_m = None
+
+        # Array of fretted tension lengths
+        self.frettedTauArr_N = None
+        
+        # Tension multiplier
+        self.tauFreqMultArr = None
+
+        # Stiffness multiplier
+        self.stiffFreqMultArr = None
+        
