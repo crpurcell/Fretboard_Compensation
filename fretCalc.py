@@ -5,7 +5,7 @@
 #                                                                             #
 # PURPOSE:  Code to calculate the fretboard layout of a stringed instrument.  #
 #                                                                             #
-# MODIFIED: 28-Jul-2010 by C. Purcell                                         #
+# MODIFIED: 01-Aug-2019 by C. Purcell                                         #
 #                                                                             #
 #=============================================================================#
 from matplotlib import pyplot as plt
@@ -69,17 +69,29 @@ class instrument:
         # Loop through each of the strings in turn and fit
         for strObj in self.stringLst:
 
-            ### BELOW JUST FOR TESTING - SHOULD BE IN MODEL FUNCTION
-            
-            # Calculate the fretted length
-            strObj.frettedLenArr_m = self._calc_fretted_length(strObj)
+            # Get a function to evaluate chi-squared for current string
+            # Free parameters are p = [nutOffset_m, saddleOffset_m]
+            calc_chisq = self._get_chisq_func(strObj)
 
-            # Calculate the tension multiplier
-            strObj.tauFreqMultArr = self._calc_tension_mult(strObj)
-            
-            # Calculate the stiffness multiplier
-            strObj.stiffFreqMultArr = self._calc_stiff_mult(strObj)
+            # Optimise p to minimise chi-squared
+            p0 = [0.0, 0.0]
+            retMatrix = op.fmin(calc_chisq, p0, full_output=1, disp=False,
+                                retall=False)
 
+            # Parse the return values and store in the string object
+            p = retMatrix[0]
+            chiSq = retMatrix[1]
+            chiSqRed = chiSq/(self.nFrets-len(p)-1)
+            strObj.nutOffset_m = p[0]
+            strObj.saddleOffset_m = p[1]
+
+            # Feedback to user
+            print("-" * 80)
+            print("chi-Squared         = {:.1f}".format(chiSq))
+            print("chi-Squared Reduced = {:.1f}".format(chiSqRed))
+            print("Offsets:            = {:.2f} mm, {:.2f} mm".format(
+                p[0]*1000, p[1]*1000))
+            
     def print_fretboard():
         """
         Print a scale diagram of the fretboard.
@@ -96,8 +108,8 @@ class instrument:
 
         # If called with no stringObj, default to no offsets
         if strObj is None:
-            nutOffset_m = 0
-            saddleOffset_m = 0
+            nutOffset_m = 0.0
+            saddleOffset_m = 0.0
         else:
             nutOffset_m = strObj.nutOffset_m
             saddleOffset_m = strObj.saddleOffset_m
@@ -170,13 +182,13 @@ class instrument:
         # Calculate L2, the string length below the finger press
         L2 = np.sqrt(actionSaddle_m**2.0 + strObj.vibeLenArr_m**2.0)
 
-        # Deflected length: nut-to-finger + fingerWidth + fret-to-saddle
+        # Fretted length: nut-to-finger + fingerWidth + fret-to-saddle
         # Set the nut to the open length and saddle to np.nan
-        newLArr = L1 + fingerWidthArr_m + L2
-        newLArr[0] = strObj.vibeLenArr_m[0]
-        newLArr[-1] = np.nan
+        frettedLenArr_m = L1 + fingerWidthArr_m + L2
+        frettedLenArr_m[0] = strObj.vibeLenArr_m[0]
+        frettedLenArr_m[-1] = np.nan
 
-        return newLArr
+        return frettedLenArr_m
     
     def _calc_tension_mult(self, strObj):
         """
@@ -199,7 +211,7 @@ class instrument:
                                   * (strObj.frettedLenArr_m - slackL_m)
                                   / slackL_m)
     
-        # Frequency multiplier proportional to sqrt(tension)
+        # The frequency multiplier is proportional to sqrt(tension)
         return np.sqrt(strObj.frettedTauArr_N / tauOpen_N)
 
     def _calc_stiff_mult(self, strObj, n=1):
@@ -214,7 +226,7 @@ class instrument:
         tau_N = (strObj.massPerLength_kgm
                      * np.power(2 * lenOpen_m * strObj.freqOpen_Hz, 2))
 
-        # ALT: More correct to use the deflected tension, but small effect
+        # Note: More correct to use the deflected tension, but small effect
         #tau_N =  strObj.frettedTauArr_N
 
         # Calculate the alpha and beta stretch terms
@@ -236,7 +248,9 @@ class instrument:
 
     def _get_model_func(self, strObj):
         """
-        Get a model function with fixed instrument & string parameters
+        Return a function to calculate the frequecny offset for the
+        instrument given a string object. The returned function takes a
+        vector of p = [nutOffset_m, saddleOffset_m] as an argument.
         """
     
         # Return function takes only a vector of free parameters
@@ -274,7 +288,41 @@ class instrument:
             return deltaFreq_cent
     
         return calc_deltafreq_cent
+
+    def _get_chisq_func(self, strObj, weightArr=None):
+        """
+        Return a function to calculate the chi-squared of the current
+        instrument given a string object. The returned function takes a
+        vector of p = [nutOffset_m, saddleOffset_m] as an argument.
+        """
+
+        # Return function takes only a vector of free parameters
+        def calc_chisq(p=[0, 0]):
+            """
+            Function to caclulate chi-squared given nut & bridge offset.
+        
+            p = [nutOffset_m, saddleOffset_m]
+            """
+            
+            # Get the model function
+            model = self._get_model_func(strObj)
+        
+            # Calculate the intonation error array
+            deltaFreq_cent = model(p)
+        
+            # Set the weight to unity by default
+            if weightArr is None:
+                weights = np.ones_like(deltaFreq_cent)
+            else:
+                weights = weightArr
+        
+            # Calculate chi-squared
+            chiSq = np.nansum( (deltaFreq_cent[1:]**2/weights[1:])**2 )
     
+            return chiSq
+        
+        return calc_chisq
+        
 #-----------------------------------------------------------------------------#
 class string:
     """
@@ -307,7 +355,7 @@ class string:
         # Array of vibrating lengths that define fretboard
         self.vibeLenArr_m = None
         
-        # Array of ideal frequencies (including offsets)
+        # Array of ideal frequencies for current fretboard
         self.freqArr_Hz = None
 
         # Array of open fretted lengths from the clothesline effect
@@ -316,9 +364,9 @@ class string:
         # Array of fretted tension lengths
         self.frettedTauArr_N = None
         
-        # Tension multiplier
+        # Tension multiplier array
         self.tauFreqMultArr = None
 
-        # Stiffness multiplier
+        # Stiffness multiplier array
         self.stiffFreqMultArr = None
         
