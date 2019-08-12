@@ -84,7 +84,8 @@ class instrument:
             chiSqRed = chiSq/(self.nFrets-len(p)-1)
             strObj.nutOffset_m = p[0]
             strObj.saddleOffset_m = p[1]
-
+            print(retMatrix)
+            
             # Feedback to user
             print("-" * 80)
             print("chi-Squared         = {:.1f}".format(chiSq))
