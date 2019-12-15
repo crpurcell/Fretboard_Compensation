@@ -23,7 +23,7 @@ class instrument:
     def __init__(self, nFrets=18, scaleLength_m=420.0/1000,
                  actionNut_m=1.5/1000, actionFret12_m=3.5/1000,
                  fretHeight_m=1.0/1000, depressHeight_m=0.5/1000,
-                 depressMod=0.2, stringSep_m=0.007):
+                 depressMod=0.2, stringSep_m=7/1000):
         """
         Constructor for the instrument class.
         """
@@ -33,9 +33,9 @@ class instrument:
         self.scaleLength_m = scaleLength_m
         self.actionNut_m  = actionNut_m
         self.actionFret12_m = actionFret12_m
-        self.fretHeight_m = fretHeight_m,
-        self.depressHeight_m = depressHeight_m ,
-        self.depressMod = depressMod,
+        self.fretHeight_m = fretHeight_m
+        self.depressHeight_m = depressHeight_m
+        self.depressMod = depressMod
         self.stringSep_m = stringSep_m
 
         # Calculate the fret positions for an ideal instrument (no offsets)
@@ -45,7 +45,7 @@ class instrument:
         self.stringLst = []
 
     def add_string(self, freqOpen_Hz=440.0, massPerLength_kgm=1e-4,
-                   stringDiameter_m=0.0005, elasticity_Pa=4e9):
+                   stringDiameter_m=0.5/1000, elasticity_Pa=4e9):
         """
         Add a string to the instrument and calculate basic parameters.
         """
@@ -92,6 +92,7 @@ class instrument:
             
             # Feedback to user
             print("-" * 80)
+            print("Frequency           = {:.2f} Hz".format(strObj.freqOpen_Hz))
             print("Num. Iterations     = {:d}".format(nIter))
             print("Warning Flag        = {:d}".format(warnFlag))
             print("chi-Squared         = {:.1f}".format(chiSq))
@@ -155,7 +156,7 @@ class instrument:
 
         return freqArr_Hz
     
-   def _calc_fretted_length(self, strObj):
+    def _calc_fretted_length(self, strObj):
         """
         Return an array of open string lengths corresponding to the string
         being depressed behind each fret. This is the fundamental geometric
@@ -171,29 +172,29 @@ class instrument:
         actionSaddle_m = self.actionFret12_m - m * strObj.vibeLenArr_m[12]
 
         # Intermediate variables
-        a = fretHeight
+        a = self.fretHeight_m
         b = self.actionNut_m - self.fretHeight_m
         c = actionSaddle_m - self.actionNut_m
 
         # We assume that vibeLenArr contains only ideal, projectected lengths
         # i.e., already projected onto the fretboard coord system.
         # Need to calculate Lopen as the projection onto the string
-        Lproj = strObj.vibeLenArr[0]
-        Lopen = np.sqrt(strObj.vibeLenArr[0]**2.0 + c**2.0)
+        Lproj = strObj.vibeLenArr_m[0]
+        Lopen = np.sqrt(strObj.vibeLenArr_m[0]**2.0 + c**2.0)
 
         # Calculate the fret width array
-        fretWidthArr = np.zeros_like(strObj.vibeLenArr)
-        fretWidthArr[1:] = -1 * np.diff(strObj.vibeLenArr)    
+        fretWidthArr = np.zeros_like(strObj.vibeLenArr_m)
+        fretWidthArr[1:] = -1 * np.diff(strObj.vibeLenArr_m)    
         fretWidthArr[-1] = np.nan
 
         # Calculate l1, the string length above the finger press.
         # At 1st fret l1 = 0 because there is no fret closer to nut.
-        l1 = np.sqrt(b**2.0 + (Lproj - fretWidthArr - strObj.vibeLenArr)**2.0)
+        l1 = np.sqrt(b**2.0 + (Lproj - fretWidthArr - strObj.vibeLenArr_m)**2.0)
         l1[0:2] = 0
     
         # Calculate l3, the string length below the finger press
         # At nut (index=0) l3 = Lopen
-        l3 = np.sqrt((b + c)**2.0 + strObj.vibeLenArr**2.0)
+        l3 = np.sqrt((b + c)**2.0 + strObj.vibeLenArr_m**2.0)
         l3[0] = Lopen
 
         # Calculate the depressHeight array, which becomes less as the
@@ -201,10 +202,10 @@ class instrument:
         # strength of the correction with fret-number, with 0 = light 
         # finger (less depression at higher frets) and 1 = heavy finger
         # (full depression at higher frets).
-        depressHeightArr = np.ones_like(fretWidthArr) * depressHeight
+        depressHeightArr = np.ones_like(fretWidthArr) * self.depressHeight_m
         depressHeightArr[-1] = np.nan
         depressFrac = fretWidthArr/fretWidthArr[1]
-        depressFrac += (1-depressFrac) * strObj.depressMod
+        depressFrac += (1-depressFrac) * self.depressMod
         depressHeightArr *= depressFrac
 
         # Calculate g, the offset from the fret
@@ -223,48 +224,6 @@ class instrument:
         # Deflected length: nut-to-finger + fingerWidth + fret-to-saddle
         # Set the nut to the open length and saddle to np.nan
         frettedLenArr_m = l1 + l2 + l3
-        frettedLenArr_m[-1] = np.nan
-
-        return frettedLenArr_m
-    
-    def _calc_fretted_length_old(self, strObj):
-        """
-        Return an array of open string lengths corresponding to the string
-        being depressed behind each fret. This is the fundamental geometric
-        model based on the 'clothes-line' effect.
-        """
-
-        # Calculate the slope of the open string and action at saddle
-        x1 = strObj.vibeLenArr_m[12]
-        x2 = strObj.vibeLenArr_m[0]
-        y1 = self.actionFret12_m
-        y2 = self.actionNut_m
-        m = (y2 - y1) / (x2 - x1)
-        actionSaddle_m = self.actionFret12_m - m * strObj.vibeLenArr_m[12]
-
-        # Calculate Lprime: string length  projected to the fingerboard
-        Lprime = ( np.sqrt(strObj.vibeLenArr_m[0]**2.0
-                           - (actionSaddle_m - self.actionNut_m)**2.0) )
-
-        # Calculate the clipped finger width (if overlaps previous fret)
-        fretWidthArr_m = np.zeros_like(strObj.vibeLenArr_m)
-        fretWidthArr_m[1:] = -1 * np.diff(strObj.vibeLenArr_m)
-        fingerWidthArr_m = np.where(fretWidthArr_m <= self.fingerWidth_m,
-                                    fretWidthArr_m, self.fingerWidth_m)
-        fingerWidthArr_m[-1] = 0
-
-        # Calculate L1, the string length above the finger press
-        L1 = np.sqrt(self.actionNut_m**2.0
-                     + (Lprime - fingerWidthArr_m
-                        - strObj.vibeLenArr_m)**2.0)
-
-        # Calculate L2, the string length below the finger press
-        L2 = np.sqrt(actionSaddle_m**2.0 + strObj.vibeLenArr_m**2.0)
-
-        # Fretted length: nut-to-finger + fingerWidth + fret-to-saddle
-        # Set the nut to the open length and saddle to np.nan
-        frettedLenArr_m = L1 + fingerWidthArr_m + L2
-        frettedLenArr_m[0] = strObj.vibeLenArr_m[0]
         frettedLenArr_m[-1] = np.nan
 
         return frettedLenArr_m
@@ -440,7 +399,7 @@ class string:
         # Array of open fretted lengths from the clothesline effect
         self.frettedLenArr_m = None
 
-        # Array of fretted tension lengths
+        # Array of fretted tension
         self.frettedTauArr_N = None
         
         # Tension multiplier array
