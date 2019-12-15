@@ -20,16 +20,18 @@ fretboard for use by luthiers.
 ## Using fretCalc.py
 
 The ```fretCalc.py``` code defines classes that can be used to
-determine optimal nut and bridge offsets that minimise the intonation
+fit for optimal nut and bridge offsets that minimise the intonation
 error of each string of an instrument. The code is meant to be used
 interactively, e.g., from an iPython terminal or Jupyter notebook, and
 is capable of producing a scale fretboard diagram.
 
-### Note on string parameters:
-
 Values of elasticity (Young's modulus) for nylon strings range from
 4.41 GPa - 5.40 GPa, with the former being the value used in the
-literature for Aquila branded strings (Wong 2014).
+literature for Aquila branded strings (Wong 2014). However, string
+parameters should ideally be measured directly (notes coming soon!).
+
+The following shows how to run ```fretCalc.py``` from an interactive
+python shell or notebook:
 
 ```
 # Import the instrument and string classes
