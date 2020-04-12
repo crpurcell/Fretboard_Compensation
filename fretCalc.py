@@ -5,7 +5,7 @@
 #                                                                             #
 # PURPOSE:  Code to calculate the fretboard layout of a stringed instrument.  #
 #                                                                             #
-# MODIFIED: 15-Dec-2019 by C. Purcell                                         #
+# MODIFIED: 12-Apr-2020 by C. Purcell                                         #
 #                                                                             #
 #=============================================================================#
 from matplotlib import pyplot as plt
@@ -89,7 +89,7 @@ class instrument:
             warnFlag = retMatrix[4]
             strObj.nutOffset_m = p[0]
             strObj.saddleOffset_m = p[1]
-            
+
             # Feedback to user
             print("-" * 80)
             print("Frequency           = {:.2f} Hz".format(strObj.freqOpen_Hz))
@@ -99,13 +99,21 @@ class instrument:
             print("chi-Squared Reduced = {:.1f}".format(chiSqRed))
             print("Offsets:            = {:.2f} mm, {:.2f} mm".format(
                 p[0]*1000, p[1]*1000))
-            
-    def print_fretboard():
+
+    def print_fretboard(self):
+        """
+        Print the fretboard parmeters.
+        """
+
+        print("Action Nut (mm)     = {:.1f} Hz".format(self.actionNut_m * 1000))
+
+    def print_fretboard_diagram(self):
         """
         Print a scale diagram of the fretboard.
         """
 
         pass
+        # Print common parameters
 
     def _calc_vibelen(self, strObj=None, verbose=False):
         """
@@ -155,7 +163,7 @@ class instrument:
                           / strObj.vibeLenArr_m)
 
         return freqArr_Hz
-    
+
     def _calc_fretted_length(self, strObj):
         """
         Return an array of open string lengths corresponding to the string
@@ -169,12 +177,13 @@ class instrument:
         y1 = self.actionFret12_m
         y2 = self.actionNut_m
         m = (y2 - y1) / (x2 - x1)
-        actionSaddle_m = self.actionFret12_m - m * strObj.vibeLenArr_m[12]
+        strObj.actionSaddle_m = (self.actionFret12_m
+                                 - m * strObj.vibeLenArr_m[12])
 
         # Intermediate variables
         a = self.fretHeight_m
         b = self.actionNut_m - self.fretHeight_m
-        c = actionSaddle_m - self.actionNut_m
+        c = strObj.actionSaddle_m - self.actionNut_m
 
         # We assume that vibeLenArr contains only ideal, projectected lengths
         # i.e., already projected onto the fretboard coord system.
@@ -184,14 +193,14 @@ class instrument:
 
         # Calculate the fret width array
         fretWidthArr = np.zeros_like(strObj.vibeLenArr_m)
-        fretWidthArr[1:] = -1 * np.diff(strObj.vibeLenArr_m)    
+        fretWidthArr[1:] = -1 * np.diff(strObj.vibeLenArr_m)
         fretWidthArr[-1] = np.nan
 
         # Calculate l1, the string length above the finger press.
         # At 1st fret l1 = 0 because there is no fret closer to nut.
         l1 = np.sqrt(b**2.0 + (Lproj - fretWidthArr - strObj.vibeLenArr_m)**2.0)
         l1[0:2] = 0
-    
+
         # Calculate l3, the string length below the finger press
         # At nut (index=0) l3 = Lopen
         l3 = np.sqrt((b + c)**2.0 + strObj.vibeLenArr_m**2.0)
@@ -199,7 +208,7 @@ class instrument:
 
         # Calculate the depressHeight array, which becomes less as the
         # frets get closer together. The depressMod term decreases the
-        # strength of the correction with fret-number, with 0 = light 
+        # strength of the correction with fret-number, with 0 = light
         # finger (less depression at higher frets) and 1 = heavy finger
         # (full depression at higher frets).
         depressHeightArr = np.ones_like(fretWidthArr) * self.depressHeight_m
@@ -215,7 +224,7 @@ class instrument:
         l2 = (np.sqrt(depressHeightArr**2.0 + (fretWidthArr - gArr)**2.0) +
               np.sqrt(depressHeightArr**2.0 + gArr**2.0))
         l2[0] = 0
-        
+
         # Calculate l2 at the 1st fret, which runs directly to the nut
         l2[1] = (np.sqrt((depressHeightArr[1] + b)**2.0 +
                          (fretWidthArr[1] - gArr[1])**2.0) +
@@ -227,14 +236,14 @@ class instrument:
         frettedLenArr_m[-1] = np.nan
 
         return frettedLenArr_m
-    
+
     def _calc_tension_mult(self, strObj):
         """
         Return an array of (tau + delta_tau) / given the open string
         frequency, scale-length, string properties and the increase in
         string length due to bending.
         """
-    
+
         # Calculate the tension in the open string
         lenOpen_m = strObj.frettedLenArr_m[0]
         tauOpen_N = (strObj.massPerLength_kgm
@@ -243,12 +252,12 @@ class instrument:
         # Calculate the slack length
         slackL_m = lenOpen_m / (tauOpen_N
                                 / (strObj.elasticity_Pa * strObj.area_m2) + 1)
-    
+
         # Calculate the tension in the deflected string
         strObj.frettedTauArr_N = (strObj.elasticity_Pa * strObj.area_m2
                                   * (strObj.frettedLenArr_m - slackL_m)
                                   / slackL_m)
-    
+
         # The frequency multiplier is proportional to sqrt(tension)
         return np.sqrt(strObj.frettedTauArr_N / tauOpen_N)
 
@@ -258,7 +267,7 @@ class instrument:
         of the frequency of the nth harmonic due to the resistance of the
         string to bending motions. Assume n=1 dominates perception of tuning.
         """
-    
+
         # Calculate the tension in the open string
         lenOpen_m = strObj.vibeLenArr_m[0]
         tau_N = (strObj.massPerLength_kgm
@@ -277,11 +286,11 @@ class instrument:
         with np.errstate(divide='ignore', invalid='ignore'):
             stiffFreqMultArr = (1 + 2 * beta / strObj.vibeLenArr_m
                                 + alpha * beta**2 / strObj.vibeLenArr_m**2)
-        
+
         # Assuming tuned to open string, so normalise to 1 at nut
         stiffFreqMultArr /= stiffFreqMultArr[0]
         stiffFreqMultArr[stiffFreqMultArr == np.inf] = np.nan
-    
+
         return stiffFreqMultArr
 
     def _get_model_func(self, strObj):
@@ -290,30 +299,30 @@ class instrument:
         instrument given a string object. The returned function takes a
         vector of p = [nutOffset_m, saddleOffset_m] as an argument.
         """
-    
+
         # Return function takes only a vector of free parameters
         def calc_deltafreq_cent(p=[0, 0]):
             """
             Model function to calculate intonation given nut & bridge offset.
-        
+
             p = [nutOffset_m, saddleOffset_m]
             """
-    
+
             # Update the offsets in the string object
             strObj.nutOffset_m, strObj.saddleOffset_m = p
 
             # Calculate the fret positions including offsets
             strObj.vibeLenArr_m = self._calc_vibelen(strObj)
-    
+
             # Calculate the ideal frequencies including offsets
             strObj.freqArr_Hz = self._calc_freqs(strObj)
-            
+
             # Calculate the deflected length
             strObj.frettedLenArr_m = self._calc_fretted_length(strObj)
-    
+
             # Calculate the tension multiplier
             strObj.tauFreqMultArr = self._calc_tension_mult(strObj)
-            
+
             # Calculate the stiffness multiplier
             strObj.stiffFreqMultArr = self._calc_stiff_mult(strObj)
 
@@ -322,9 +331,9 @@ class instrument:
                              * strObj.tauFreqMultArr)
             deltaFreq_cent = 1200 * np.log2(freqNewArr_Hz
                                             / strObj.freqIdealArr_Hz)
-    
+
             return deltaFreq_cent
-    
+
         return calc_deltafreq_cent
 
     def _get_chisq_func(self, strObj, weightArr=None):
@@ -338,29 +347,29 @@ class instrument:
         def calc_chisq(p=[0, 0]):
             """
             Function to caclulate chi-squared given nut & bridge offset.
-        
+
             p = [nutOffset_m, saddleOffset_m]
             """
-            
+
             # Get the model function
             model = self._get_model_func(strObj)
-        
+
             # Calculate the intonation error array
             deltaFreq_cent = model(p)
-        
+
             # Set the weight to unity by default
             if weightArr is None:
                 weights = np.ones_like(deltaFreq_cent)
             else:
                 weights = weightArr
-        
+
             # Calculate chi-squared
             chiSq = np.nansum( (deltaFreq_cent[1:]**2/weights[1:])**2 )
-    
+
             return chiSq
-        
+
         return calc_chisq
-        
+
 #-----------------------------------------------------------------------------#
 class string:
     """
@@ -385,14 +394,15 @@ class string:
         self.freqIdealArr_Hz = None
 
         #------- Variables below here are dynamic; depend on offsets ---------#
-        
+
         # Initialise nut and saddle offsets
         self.nutOffset_m = 0.0
         self.saddleOffset_m = 0.0
+        self.actionSaddle_m = None
 
         # Array of vibrating lengths that define fretboard
         self.vibeLenArr_m = None
-        
+
         # Array of ideal frequencies for current fretboard
         self.freqArr_Hz = None
 
@@ -401,10 +411,9 @@ class string:
 
         # Array of fretted tension
         self.frettedTauArr_N = None
-        
+
         # Tension multiplier array
         self.tauFreqMultArr = None
 
         # Stiffness multiplier array
         self.stiffFreqMultArr = None
-        
